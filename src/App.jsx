@@ -13,6 +13,7 @@ const uid   = () => Math.random().toString(36).slice(2,10)
 const today = () => new Date().toISOString().slice(0,10)
 const TRIP_KEY = 'holiday-trip-id'
 const USER_KEY = 'holiday-current-user'
+const ADMIN_KEY = 'holiday-is-admin'
 
 // ── Categories ────────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -307,7 +308,7 @@ function SetupView({data,update,currentUser}) {
 }
 
 // ── Add Expense View ──────────────────────────────────────────────────────────
-function AddView({data,update,currentUser}) {
+function AddView({data,update,currentUser,isAdmin=false}) {
   const [tab,setTab]=useState('event')
   const [msg,setMsg]=useState('')
   const flash=m=>{setMsg(m);setTimeout(()=>setMsg(''),3500)}
@@ -720,7 +721,7 @@ function ReceiptView({data,update,currentUser}) {
 // ── Events (Ausgaben) View ────────────────────────────────────────────────────
 const SORT_MODES=[{id:'date_desc',l:'Datum ↓'},{id:'date_asc',l:'Datum ↑'},{id:'grouped',l:'Gruppiert'},{id:'kanban',l:'Kanban'},{id:'manual',l:'Manuell'}]
 
-function EventsView({data,update,currentUser}) {
+function EventsView({data,update,currentUser,isAdmin=false}) {
   const [sortMode,setSortMode]=useState('date_desc')
   const [expanded,setExpanded]=useState({})
   const [editEvt,setEditEvt]=useState(null)
@@ -800,7 +801,7 @@ function EventsView({data,update,currentUser}) {
                     <span style={{fontSize:13,color:C.accent,fontWeight:500}}>{pName(en.personId)}</span>
                     <div style={{display:'flex',gap:6,alignItems:'center'}}>
                       <span style={{fontSize:12,color:C.muted}}>{fmt(en.items.reduce((s,i)=>s+i.price,0))}</span>
-                      <Btn onClick={()=>setEditEntry(en)} variant='ghost' small>Bearbeiten</Btn>
+                      <Btn onClick={()=>{if(!isAdmin&&en.personId!==currentUser?.id){alert('Du kannst nur deine eigenen Bestellungen bearbeiten.');return};setEditEntry(en)}} variant='ghost' small>Bearbeiten</Btn>
                     </div>
                   </div>
                   {en.items.map((i,ii)=><div key={i.id||ii} style={{display:'flex',justifyContent:'space-between',fontSize:12,color:C.muted,paddingLeft:8}}><span>{i.name}</span><span>{fmt(i.price)}</span></div>)}
@@ -819,7 +820,7 @@ function EventsView({data,update,currentUser}) {
               </Btn>
             )}
             <Btn onClick={()=>{if(!currentUser){alert('Bitte zuerst „Wer bist du?" auswählen.');return};setEditEvt(evt)}} variant='default' small>Bearbeiten</Btn>
-            <Btn onClick={()=>delEvt(evt.id)} variant='danger' small style={{marginLeft:'auto'}}>Löschen</Btn>
+            <Btn onClick={()=>{if(!isAdmin){alert('Nur der Admin kann Events löschen.');return};delEvt(evt.id)}} variant='danger' small style={{marginLeft:'auto',opacity:isAdmin?1:0.3}}>Löschen</Btn>
           </div>
         )}
         {!compact&&evt.lastEditedBy&&<div style={{fontSize:11,color:C.faint,marginTop:6}}>Zuletzt bearbeitet von <strong>{evt.lastEditedBy}</strong></div>}
@@ -887,7 +888,7 @@ function EventsView({data,update,currentUser}) {
 }
 
 // ── Settle View ───────────────────────────────────────────────────────────────
-function SettleView({data}) {
+function SettleView({data,isAdmin=false}) {
   const [drillPerson,setDrillPerson]=useState(null)
   const [drillType,setDrillType]=useState(null)
 
@@ -1025,8 +1026,64 @@ function SettleView({data}) {
           :txns.map((t,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 0',borderBottom:`1px solid ${C.border}`}}><span style={{fontWeight:500,flex:1}}>{pName(t.from)}</span><span style={{color:C.faint,fontSize:13}}>zahlt</span><span style={{fontWeight:500,flex:1}}>{pName(t.to)}</span><span style={{color:C.accent,fontWeight:600,fontSize:16}}>{fmt(t.amt)}</span></div>)
         }
       </Card>
-      <Btn onClick={exportCSV} variant='success' full>Gesamtübersicht als CSV exportieren ↓</Btn>
+      {isAdmin&&<Btn onClick={exportCSV} variant='success' full>Gesamtübersicht als CSV exportieren ↓</Btn>}
       <DrillModal/>
+    </div>
+  )
+}
+
+// ── Admin PIN Modal ──────────────────────────────────────────────────────────
+function AdminPinModal({data,onSuccess,onClose}) {
+  const [pin,setPin]=useState('')
+  const [err,setErr]=useState('')
+  const stored=data.adminPin||'1234'
+  const check=()=>{
+    if(pin===stored){onSuccess()}
+    else{setErr('Falscher PIN. Bitte erneut versuchen.');setPin('')}
+  }
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.82)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:'min(340px,92vw)'}}>
+        <div style={{fontSize:16,fontWeight:600,marginBottom:4}}>Admin-Zugang</div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Bitte Admin-PIN eingeben.</div>
+        <input
+          type='password' value={pin} onChange={e=>setPin(e.target.value)}
+          onKeyDown={e=>e.key==='Enter'&&check()}
+          placeholder='PIN…' autoFocus
+          style={{...{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 14px',fontSize:18,color:C.text,fontFamily:'inherit',outline:'none',width:'100%',boxSizing:'border-box',letterSpacing:'0.3em',textAlign:'center'},marginBottom:10}}
+        />
+        {err&&<div style={{fontSize:12,color:C.red,marginBottom:10}}>{err}</div>}
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={onClose} style={{flex:1,padding:'9px',borderRadius:8,border:`1px solid ${C.border}`,background:'transparent',color:C.muted,cursor:'pointer',fontFamily:'inherit',fontSize:13}}>Abbrechen</button>
+          <button onClick={check} style={{flex:1,padding:'9px',borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:'#0f0f0f',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600}}>Weiter</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Set PIN Modal (first-time admin setup) ────────────────────────────────────
+function SetPinModal({onSave,onClose}) {
+  const [pin,setPin]=useState('')
+  const [confirm,setConfirm]=useState('')
+  const [err,setErr]=useState('')
+  const save=()=>{
+    if(pin.length<4){setErr('PIN muss mindestens 4 Zeichen haben.');return}
+    if(pin!==confirm){setErr('PINs stimmen nicht überein.');return}
+    onSave(pin)
+  }
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.82)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:'min(340px,92vw)'}}>
+        <div style={{fontSize:16,fontWeight:600,marginBottom:4}}>Admin-PIN festlegen</div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Lege einen PIN fest, mit dem du auf die Admin-Funktionen zugreifen kannst.</div>
+        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:10}}>
+          <input type='password' value={pin} onChange={e=>setPin(e.target.value)} placeholder='PIN wählen…' style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 14px',fontSize:16,color:C.text,fontFamily:'inherit',outline:'none',width:'100%',boxSizing:'border-box',textAlign:'center',letterSpacing:'0.2em'}}/>
+          <input type='password' value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={e=>e.key==='Enter'&&save()} placeholder='PIN bestätigen…' style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 14px',fontSize:16,color:C.text,fontFamily:'inherit',outline:'none',width:'100%',boxSizing:'border-box',textAlign:'center',letterSpacing:'0.2em'}}/>
+        </div>
+        {err&&<div style={{fontSize:12,color:C.red,marginBottom:10}}>{err}</div>}
+        <button onClick={save} style={{width:'100%',padding:'10px',borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:'#0f0f0f',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600}}>PIN speichern & Admin werden</button>
+      </div>
     </div>
   )
 }
@@ -1036,14 +1093,21 @@ export default function App() {
   const [data,setData]=useState(null)
   const [loading,setLoading]=useState(true)
   const [syncing,setSyncing]=useState(false)
-  const [view,setView]=useState('setup')
+  const [view,setView]=useState('add')
   const [currUser,setCurrUser]=useState(null)
   const [showPicker,setShowPicker]=useState(false)
+  const [isAdmin,setIsAdmin]=useState(false)
+  const [showAdminPin,setShowAdminPin]=useState(false)
+  const [showSetPin,setShowSetPin]=useState(false)
   const tripId=useRef(null)
 
   useEffect(()=>{
-    let id=localStorage.getItem(TRIP_KEY);if(!id){id=uid();localStorage.setItem(TRIP_KEY,id)};tripId.current=id
+    let id=window.location.hash.replace('#','').trim()
+    if(!id||id.length<6){id=uid();window.location.hash=id}
+    tripId.current=id
     const saved=localStorage.getItem(USER_KEY);if(saved){try{setCurrUser(JSON.parse(saved))}catch{}}
+    // Restore admin status for this session
+    if(localStorage.getItem(ADMIN_KEY)==='1')setIsAdmin(true)
     loadAppData(id).then(d=>{setData(d||INIT);setLoading(false)}).catch(()=>{setData(INIT);setLoading(false)})
   },[])
 
@@ -1059,48 +1123,101 @@ export default function App() {
 
   const selectUser=p=>{setCurrUser(p);localStorage.setItem(USER_KEY,JSON.stringify(p));setShowPicker(false)}
 
+  const activateAdmin=()=>{
+    setIsAdmin(true)
+    localStorage.setItem(ADMIN_KEY,'1')
+    setShowAdminPin(false)
+    setView('setup')
+  }
+  const deactivateAdmin=()=>{
+    setIsAdmin(false)
+    localStorage.removeItem(ADMIN_KEY)
+    setView('add')
+  }
+
+  const savePin=(pin)=>{
+    update(d=>({...d,adminPin:pin}))
+    setShowSetPin(false)
+    setIsAdmin(true)
+    localStorage.setItem(ADMIN_KEY,'1')
+    setView('setup')
+  }
+
   if(loading)return<div style={{background:C.bg,minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:C.muted,fontSize:14}}>Wird geladen…</div>
 
-  const VIEWS=[
+  // Admin sees all tabs; regular users see a simplified set
+  const ADMIN_VIEWS=[
     {id:'setup',l:'Einstellungen'},
     {id:'add',l:'Hinzufügen'},
     {id:'receipt',l:'Quittung'},
     {id:'events',l:'Events'},
     {id:'settle',l:'Abrechnung'},
   ]
+  const USER_VIEWS=[
+    {id:'add',l:'Hinzufügen'},
+    {id:'events',l:'Events'},
+    {id:'settle',l:'Abrechnung'},
+  ]
+  const VIEWS=isAdmin?ADMIN_VIEWS:USER_VIEWS
+
+  // Keep view in sync when switching modes
+  const validViews=VIEWS.map(v=>v.id)
+  const activeView=validViews.includes(view)?view:VIEWS[0].id
 
   return(
     <div style={{background:C.bg,minHeight:'100vh',color:C.text}}>
-      <div style={{borderBottom:`1px solid ${C.border}`,padding:'0 20px',position:'sticky',top:0,background:C.bg,zIndex:50}}>
-        <div style={{maxWidth:760,margin:'0 auto',display:'flex',justifyContent:'space-between',alignItems:'center',height:54}}>
-          <div style={{display:'flex',alignItems:'baseline',gap:10}}>
-            <span style={{fontSize:17,fontWeight:600,color:C.accent}}>{data.tripName}</span>
-            <span style={{fontSize:11,color:syncing?C.muted:C.faint}}>{syncing?'Speichern…':`#${tripId.current?.slice(0,6).toUpperCase()}`}</span>
+      {/* Header */}
+      <div style={{borderBottom:`1px solid ${C.border}`,padding:'0 16px',position:'sticky',top:0,background:C.bg,zIndex:50}}>
+        <div style={{maxWidth:760,margin:'0 auto',display:'flex',justifyContent:'space-between',alignItems:'center',height:54,gap:8}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
+            <span style={{fontSize:16,fontWeight:600,color:C.accent,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{data.tripName}</span>
+            {syncing
+              ?<span style={{fontSize:11,color:C.muted,whiteSpace:'nowrap'}}>Speichern…</span>
+              :<button onClick={()=>{
+                const url=window.location.href
+                if(navigator.clipboard)navigator.clipboard.writeText(url).catch(()=>{})
+                alert('Link kopiert! Teile ihn mit der Gruppe — alle die ihn öffnen sehen dieselbe Reise.\n\n'+url)
+              }} style={{fontSize:11,color:C.blue,background:'transparent',border:`1px solid ${C.blue}44`,borderRadius:6,padding:'3px 8px',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>🔗 Teilen</button>
+            }
           </div>
-          <button onClick={()=>setShowPicker(true)} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 14px',borderRadius:99,background:currUser?C.accent+'22':C.surface,border:`1px solid ${currUser?C.accent+'44':C.border}`,color:currUser?C.accent:C.muted,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
-            <span style={{width:7,height:7,borderRadius:'50%',background:currUser?C.accent:C.faint,flexShrink:0}}/>
-            {currUser?currUser.name:'Wer bist du?'}
-          </button>
+          <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+            {/* Admin toggle */}
+            {isAdmin
+              ?<button onClick={deactivateAdmin} title='Admin-Modus beenden' style={{fontSize:11,color:C.orange,background:C.orange+'18',border:`1px solid ${C.orange}44`,borderRadius:6,padding:'3px 8px',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>⚙ Admin</button>
+              :<button onClick={()=>{if(!data.adminPin){setShowSetPin(true)}else{setShowAdminPin(true)}}} title='Admin-Zugang' style={{fontSize:11,color:C.faint,background:'transparent',border:`1px solid ${C.border}`,borderRadius:6,padding:'3px 8px',cursor:'pointer',fontFamily:'inherit'}}>⚙</button>
+            }
+            {/* Who are you */}
+            <button onClick={()=>setShowPicker(true)} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 12px',borderRadius:99,background:currUser?C.accent+'22':C.surface,border:`1px solid ${currUser?C.accent+'44':C.border}`,color:currUser?C.accent:C.muted,fontSize:13,cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:currUser?C.accent:C.faint,flexShrink:0}}/>
+              {currUser?currUser.name:'Wer bist du?'}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Nav */}
       <div style={{borderBottom:`1px solid ${C.border}`,padding:'0 16px',overflowX:'auto'}}>
         <div style={{maxWidth:760,margin:'0 auto',display:'flex',whiteSpace:'nowrap'}}>
-          {VIEWS.map(v=><button key={v.id} onClick={()=>setView(v.id)} style={{padding:'11px 12px',fontSize:13,background:'transparent',border:'none',borderBottom:`2px solid ${view===v.id?C.accent:'transparent'}`,color:view===v.id?C.accent:C.muted,cursor:'pointer',fontFamily:'inherit',fontWeight:view===v.id?500:400}}>{v.l}</button>)}
+          {VIEWS.map(v=><button key={v.id} onClick={()=>setView(v.id)} style={{padding:'11px 12px',fontSize:13,background:'transparent',border:'none',borderBottom:`2px solid ${activeView===v.id?C.accent:'transparent'}`,color:activeView===v.id?C.accent:C.muted,cursor:'pointer',fontFamily:'inherit',fontWeight:activeView===v.id?500:400}}>{v.l}</button>)}
         </div>
       </div>
+
+      {/* Content */}
       <div style={{maxWidth:760,margin:'0 auto',padding:'20px 16px 80px'}}>
-        {view==='setup'  &&<SetupView  data={data} update={update} currentUser={currUser}/>}
-        {view==='add'    &&<AddView    data={data} update={update} currentUser={currUser}/>}
-        {view==='receipt'&&<ReceiptView data={data} update={update} currentUser={currUser}/>}
-        {view==='events' &&<EventsView  data={data} update={update} currentUser={currUser}/>}
-        {view==='settle' &&<SettleView  data={data}/>}
+        {activeView==='setup'  &&isAdmin&&<SetupView  data={data} update={update} currentUser={currUser}/>}
+        {activeView==='add'    &&<AddView    data={data} update={update} currentUser={currUser} isAdmin={isAdmin}/>}
+        {activeView==='receipt'&&isAdmin&&<ReceiptView data={data} update={update} currentUser={currUser}/>}
+        {activeView==='events' &&<EventsView  data={data} update={update} currentUser={currUser} isAdmin={isAdmin}/>}
+        {activeView==='settle' &&<SettleView  data={data} isAdmin={isAdmin}/>}
       </div>
+
+      {/* Who are you picker */}
       {showPicker&&(
         <div onClick={()=>setShowPicker(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.78)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100}}>
           <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:24,width:'min(400px,92vw)',maxHeight:'80vh',overflowY:'auto'}}>
             <div style={{fontSize:16,fontWeight:600,marginBottom:4}}>Wer bist du?</div>
             <div style={{fontSize:13,color:C.muted,marginBottom:16}}>Dein Name wird auf diesem Gerät gespeichert.</div>
-            {!data.people.length&&<div style={{fontSize:13,color:C.faint}}>Zuerst Personen unter „Einstellungen" hinzufügen.</div>}
+            {!data.people.length&&<div style={{fontSize:13,color:C.faint}}>Noch keine Personen — Admin muss zuerst die Gruppe einrichten.</div>}
             {data.people.map(p=>(
               <button key={p.id} onClick={()=>selectUser(p)} style={{display:'block',width:'100%',textAlign:'left',padding:'11px 14px',marginBottom:6,borderRadius:8,border:`1px solid ${currUser?.id===p.id?C.accent:C.border}`,background:currUser?.id===p.id?C.accent+'22':C.surface,color:C.text,fontSize:14,cursor:'pointer',fontFamily:'inherit',fontWeight:currUser?.id===p.id?600:400}}>
                 {currUser?.id===p.id?'✓ ':''}{p.name}
@@ -1110,6 +1227,10 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Admin PIN modal */}
+      {showAdminPin&&<AdminPinModal data={data} onSuccess={activateAdmin} onClose={()=>setShowAdminPin(false)}/>}
+      {showSetPin&&<SetPinModal onSave={savePin} onClose={()=>setShowSetPin(false)}/>}
     </div>
   )
 }
