@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { loadData, saveData, subscribeToTrip } from './supabase.js'
-import { MENU, MENU_CATEGORIES } from './menuData.js'
+import { MENU, MENU_CATEGORIES, RESTAURANTS } from './menuData.js'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -199,12 +199,12 @@ async function toBase64(file) {
 
 // ── Menu item autocomplete input ──────────────────────────────────────────────
 function MenuItemInput({ value, onChange, onSelect, placeholder = 'Gericht / Getränk suchen…' }) {
-  const [query, setQuery] = useState(value || '')
-  const [open, setOpen] = useState(false)
-  const [activeCat, setActiveCat] = useState(null)
+  const [query,       setQuery]      = useState(value || '')
+  const [open,        setOpen]       = useState(false)
+  const [activeCat,   setActiveCat]  = useState(null)
+  const [restaurant,  setRestaurant] = useState('all')
   const ref = useRef(null)
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handler)
@@ -213,15 +213,26 @@ function MenuItemInput({ value, onChange, onSelect, placeholder = 'Gericht / Get
 
   const q = query.trim().toLowerCase()
 
-  // Filter menu items
-  const filtered = q.length === 0
-    ? MENU
-    : MENU.filter(item =>
-        item.name.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q)
-      )
+  const filtered = MENU
+    .filter(item => {
+      const matchesRest  = restaurant === 'all' || item.restaurant === restaurant
+      const matchesQuery = q.length === 0
+        || item.name.toLowerCase().includes(q)
+        || item.category.toLowerCase().includes(q)
+      return matchesRest && matchesQuery
+    })
+    .sort((a, b) => {
+      if (q.length === 0) return 0
+      const aName = a.name.toLowerCase()
+      const bName = b.name.toLowerCase()
+      // Starts-with match ranks highest
+      const aStarts = aName.startsWith(q) ? 0 : aName.includes(q) ? 1 : 2
+      const bStarts = bName.startsWith(q) ? 0 : bName.includes(q) ? 1 : 2
+      if (aStarts !== bStarts) return aStarts - bStarts
+      // Among equal rank, shorter name first (more specific match)
+      return a.name.length - b.name.length
+    })
 
-  // Group by category
   const grouped = filtered.reduce((acc, item) => {
     if (!acc[item.category]) acc[item.category] = []
     acc[item.category].push(item)
@@ -229,7 +240,11 @@ function MenuItemInput({ value, onChange, onSelect, placeholder = 'Gericht / Get
   }, {})
 
   const cats = Object.keys(grouped)
-  const currentCat = activeCat && grouped[activeCat] ? activeCat : cats[0] || null
+  // When searching, auto-select the category of the top result
+  const topResultCat = filtered[0]?.category || null
+  const currentCat = (activeCat && grouped[activeCat])
+    ? activeCat
+    : (q.length > 0 && topResultCat) ? topResultCat : cats[0] || null
 
   const handleSelect = item => {
     setQuery(item.name)
@@ -248,48 +263,63 @@ function MenuItemInput({ value, onChange, onSelect, placeholder = 'Gericht / Get
   return (
     <div ref={ref} style={{ position: 'relative', flex: 3 }}>
       <input
-        type='text'
-        value={query}
+        type='text' value={query}
         onChange={e => handleInput(e.target.value)}
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
-        style={{ ...{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',fontSize:14,color:C.text,fontFamily:'inherit',outline:'none',width:'100%',boxSizing:'border-box'} }}
+        style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:14, color:C.text, fontFamily:'inherit', outline:'none', width:'100%', boxSizing:'border-box' }}
       />
-      {open && cats.length > 0 && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 500,
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
-          marginTop: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.4)', overflow: 'hidden',
-          maxHeight: 360,
-        }}>
-          {/* Category tabs */}
-          <div style={{ display: 'flex', overflowX: 'auto', borderBottom: `1px solid ${C.border}`, background: C.surface }}>
-            {cats.map(cat => (
-              <button key={cat} onClick={() => setActiveCat(cat)}
-                style={{ padding: '6px 12px', fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer', fontFamily: 'inherit', background: 'transparent', border: 'none', borderBottom: `2px solid ${currentCat === cat ? C.accent : 'transparent'}`, color: currentCat === cat ? C.accent : C.muted, fontWeight: currentCat === cat ? 600 : 400 }}>
-                {cat} <span style={{ color: C.faint }}>({grouped[cat].length})</span>
+      {open && (
+        <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:500, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, boxShadow:'0 8px 24px rgba(0,0,0,0.45)', overflow:'hidden', maxHeight:380 }}>
+
+          {/* Restaurant filter */}
+          <div style={{ display:'flex', gap:0, borderBottom:`1px solid ${C.border}`, background:C.bg }}>
+            {[{id:'all',name:'Alle'}, ...RESTAURANTS].map(r => (
+              <button key={r.id} onClick={() => { setRestaurant(r.id); setActiveCat(null) }}
+                style={{ flex:1, padding:'6px 8px', fontSize:11, cursor:'pointer', fontFamily:'inherit', background:'transparent', border:'none', borderBottom:`2px solid ${restaurant===r.id ? C.accent : 'transparent'}`, color:restaurant===r.id ? C.accent : C.faint, fontWeight:restaurant===r.id ? 600 : 400, whiteSpace:'nowrap' }}>
+                {r.name}
               </button>
             ))}
           </div>
-          {/* Items list */}
-          <div style={{ overflowY: 'auto', maxHeight: 280 }}>
+
+          {/* Category tabs */}
+          {cats.length > 0 && (
+            <div style={{ display:'flex', overflowX:'auto', borderBottom:`1px solid ${C.border}`, background:C.surface }}>
+              {cats.map(cat => (
+                <button key={cat} onClick={() => setActiveCat(cat)}
+                  style={{ padding:'6px 12px', fontSize:11, whiteSpace:'nowrap', cursor:'pointer', fontFamily:'inherit', background:'transparent', border:'none', borderBottom:`2px solid ${currentCat===cat ? C.accent : 'transparent'}`, color:currentCat===cat ? C.accent : C.muted, fontWeight:currentCat===cat ? 600 : 400 }}>
+                  {cat} <span style={{ color:C.faint }}>({grouped[cat].length})</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Items */}
+          <div style={{ overflowY:'auto', maxHeight:260 }}>
             {currentCat && grouped[currentCat]?.map((item, i) => (
               <div key={i} onClick={() => handleSelect(item)}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.border}22`, fontSize: 13 }}
+                style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${C.border}22`, fontSize:13 }}
                 onMouseOver={e => e.currentTarget.style.background = C.surface}
-                onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                onMouseOut={e  => e.currentTarget.style.background = 'transparent'}
               >
-                <span style={{ color: C.text }}>{item.name}</span>
-                <span style={{ color: C.accent, fontWeight: 500, marginLeft: 12, flexShrink: 0 }}>€{item.price.toFixed(2)}</span>
+                <span style={{ color:C.text }}>{item.name}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+                  <span style={{ fontSize:10, color:C.faint }}>{item.restaurant === 'marcos' ? "Marco's" : 'Bellavista'}</span>
+                  <span style={{ color:C.accent, fontWeight:500 }}>€{item.price.toFixed(2)}</span>
+                </div>
               </div>
             ))}
+            {cats.length === 0 && q.length > 0 && (
+              <div style={{ padding:'12px 14px', fontSize:13, color:C.faint }}>Kein Treffer für „{query}"</div>
+            )}
           </div>
-          {/* Free-text option */}
+
+          {/* Manual entry option */}
           {q.length > 0 && (
             <div onClick={() => { onChange(query); setOpen(false) }}
-              style={{ padding: '9px 14px', fontSize: 12, color: C.muted, cursor: 'pointer', borderTop: `1px solid ${C.border}`, background: C.surface }}
+              style={{ padding:'8px 14px', fontSize:12, color:C.muted, cursor:'pointer', borderTop:`1px solid ${C.border}`, background:C.surface }}
               onMouseOver={e => e.currentTarget.style.color = C.text}
-              onMouseOut={e => e.currentTarget.style.color = C.muted}
+              onMouseOut={e  => e.currentTarget.style.color = C.muted}
             >
               „{query}" manuell eingeben
             </div>
